@@ -139,7 +139,6 @@ fn main() {
         let band_upper_left = pixel_to_point(bounds, (0, top), upper_left, lower_right);
         let band_lower_right = pixel_to_point(bounds, (band[0].len(), height), upper_left, lower_right);
         render(band, band_bounds, band_upper_left, band_lower_right);
-
     });
 
 
