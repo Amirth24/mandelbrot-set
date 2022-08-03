@@ -58,7 +58,7 @@ use image::{ColorType, ImageEncoder};
 use std::fs::File;
 
 fn render(
-    pixel: &mut [u8],
+    pixel: &mut Vec<Vec<u8>>,
     bounds: (usize, usize),
     upper_left: Complex<f64>,
     lower_right: Complex<f64>,
@@ -67,10 +67,12 @@ fn render(
     for r in 0..bounds.0 {
         for c in 0..bounds.1 {
             let point = pixel_to_point(bounds, (c, r), upper_left, lower_right);
-            pixel[r * bounds.0 + c] = match escape_time(point, 255) {
+            
+            pixel[r][c] = match escape_time(point, 255) {
                 None => 0,
                 Some(count) => 255 - count as u8,
             };
+            
         }
     }
 }
@@ -97,7 +99,7 @@ fn write_image(
 }
 
 use std::io::Write;
-
+use rayon::prelude::*;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 5 {
@@ -122,11 +124,37 @@ fn main() {
     let lower_right =
         parse_complex(&args[4]).expect("Error parsing lower right point of the image");
 
-    let mut pixels = vec![0; bounds.0 * bounds.1];
+    let mut pixels = vec![vec![0u8; bounds.0]; bounds.1];
 
-    render(&mut pixels, bounds, upper_left, lower_right);
+    let thread = 8;
+    let rows_per_band = bounds.1 / thread + 1;
+    
+    let mut bands: Vec<Vec<Vec<u8>>> = pixels.chunks_mut(rows_per_band ).map(|x| x.to_vec()).collect();
+    assert!(bands.len() != 1); 
+    println!("No. of bands: {}, rows per bands {} length of last band: {}", bands.len(), rows_per_band, &bands.last().unwrap().len());
+    bands.par_iter_mut().enumerate().for_each(|(i, band)|{
+        let top = rows_per_band * i;
+        let height = band.len() ;
+        let band_bounds = (band[0].len(), height);
+        let band_upper_left = pixel_to_point(bounds, (0, top), upper_left, lower_right);
+        let band_lower_right = pixel_to_point(bounds, (band[0].len(), height), upper_left, lower_right);
+        render(band, band_bounds, band_upper_left, band_lower_right);
 
-    write_image(&args[1], &mut pixels, bounds).expect("Error while writing image");
+    });
+
+
+    let mut pixels = vec_2d_to_1d(pixels);
+    write_image(&args[1], pixels.as_mut_slice(), bounds).expect("Error while writing image");
+}
+
+fn vec_2d_to_1d(v: Vec<Vec<u8>>) -> Vec<u8>{
+    let mut r = vec![0u8;v.len()*v[0].len()];
+    for i in 0..v.len(){
+        for j in 0..v[i].len(){
+            r[i*v[i].len() + j] = v[i][j];
+        }
+    }
+    r
 }
 
 #[cfg(test)]
@@ -177,5 +205,12 @@ mod tests {
         assert_eq!(parse_complex("0.0,0.0"), Some(Complex { re: 0.0, im: 0.0 }));
         assert_eq!(parse_complex("9.2,4.0"), Some(Complex { re: 9.2, im: 4.0 }));
         assert_eq!(parse_complex("343.3"), None)
+    }
+
+    #[test]
+    fn test_vec_2d_to_1d(){
+        assert_eq!(vec_2d_to_1d(vec![vec![3,51,35,45,11,3],vec![2,12,34,66,74,45]]), vec![3,51,35,45,11,3,2,12,34,66,74,45]);
+        assert_eq!(vec_2d_to_1d(vec![vec![1,2,3,4],vec![2,12]]), vec![1,2,3,4,2,12]);
+        assert_ne!(vec_2d_to_1d(vec![vec![1,2,3,4],vec![2,3,12]]), vec![1,2,3,4,2,12]);
     }
 }
